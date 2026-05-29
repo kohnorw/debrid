@@ -1,168 +1,200 @@
-# AllDebrid Indexer
+# Debridarr
 
-A self-hosted torrent search web UI + Torznab indexer backed by The Pirate Bay, with AllDebrid cache checking. Add it to Prowlarr and it syncs automatically to Sonarr and Radarr.
+On-the-fly AllDebrid streaming for Plex. When you play something in Plex, Debridarr searches for a cached torrent on AllDebrid, mounts it via FUSE, and symlinks it into your Plex library — no downloading, no storage required.
 
 ---
 
-## What it does
+## How It Works
 
-- Searches The Pirate Bay for any movie or TV show
-- Checks AllDebrid to see which torrents are instantly available (cached)
-- Exposes a Torznab API endpoint that Prowlarr, Sonarr, and Radarr can talk to
-- Web UI for manual searching and adding torrents directly to AllDebrid
+```
+Plex play → Tautulli webhook → Debridarr
+  → Search TPB for cached torrent on AllDebrid
+  → Add magnet to AllDebrid
+  → Mount file in FUSE at /docker/debridarr/mnt-alldebrid/<torrent>/<file.mkv>
+  → Symlink plex-strm/movies|tv/... → FUSE file
+  → Plex streams bytes via HTTP Range from AllDebrid CDN
+```
+
+Placeholder `.mp4` files (140 bytes) are created in your Plex library so Plex can scan and index content before it's played. On first play, the placeholder is replaced by a symlink to the real stream.
 
 ---
 
 ## Requirements
 
-- Docker
-- An AllDebrid account and API key → https://alldebrid.com/apikeys
+- Docker + Docker Compose
+- AllDebrid account with API key
+- Overseerr (for library browsing)
+- Tautulli (to detect when something is played in Plex)
+- Plex Media Server
 
 ---
 
-## Setup
-
-### 1. Extract and configure
+## First-Time Setup
 
 ```bash
-tar -xzf alldebrid-web.tar.gz
-cd alldebrid-web
+# 1. Extract files
+mkdir -p /docker/debridarr
+tar -xzf debridarr_docker.tar.gz -C /tmp/dd
+cp -r /tmp/dd/docker/debridarr/. /docker/debridarr/
+rm -rf /tmp/dd
+
+# 2. Create required directories
+mkdir -p /docker/debridarr/{data,plex-strm,mnt-alldebrid,config/tautulli}
+
+# 3. Build and start
+cd /docker/debridarr
+docker-compose build --no-cache
+docker-compose up -d
+docker logs debridarr -f
 ```
 
-Edit `docker-compose.yml` and set your keys:
+Open `http://<server-ip>:7474` and complete the setup wizard.
 
-```yaml
-environment:
-  - ALLDEBRID_API_KEY=your_alldebrid_api_key_here
-  - TORZNAB_APIKEY=pick_any_secret_string
-```
+---
 
-`TORZNAB_APIKEY` is a password you make up — Prowlarr will use it to authenticate.
-
-### 2. Build and run
+## Update / Rebuild
 
 ```bash
-# Modern Docker
-docker compose up --build -d
+cd /docker/debridarr
+docker-compose down
+docker rmi debridarr:latest --force 2>/dev/null || true
 
-# Older Docker
-docker-compose up --build -d
+mkdir -p /tmp/dd && tar -xzf ~/debridarr_docker.tar.gz -C /tmp/dd
+cp -r /tmp/dd/docker/debridarr/. /docker/debridarr/
+rm -rf /tmp/dd
 
-# Without Compose
-docker build -t alldebrid-web .
-docker run -d -p 5000:5000 \
-  -e ALLDEBRID_API_KEY=your_key \
-  -e TORZNAB_APIKEY=changeme \
-  --restart unless-stopped \
-  alldebrid-web
-```
-
-### 3. Open the web UI
-
-```
-http://localhost:5000
+docker-compose build --no-cache
+docker-compose up -d
+docker logs debridarr -f
 ```
 
 ---
 
-## Adding to Prowlarr
+## Tautulli Setup
 
-1. Go to **Prowlarr → Indexers → Add Indexer**
-2. Search for **Torznab** and select **Generic Torznab**
-3. Fill in:
-   - **Name**: AllDebrid Indexer (or anything you like)
-   - **URL**: `http://<your-docker-host-ip>:5000/torznab`
-   - **API Key**: whatever you set as `TORZNAB_APIKEY`
-4. Click **Test** — should return green
-5. Click **Save**
-6. Prowlarr will sync it to Sonarr and Radarr automatically via your app profiles
+1. Settings → Notification Agents → Add → **Webhook**
+2. **Webhook URL:** `http://debridarr:7474/webhook/tautulli`
+3. **Method:** POST
+4. **Triggers:** Playback Start only
+5. **Data tab → Playback Start**, paste:
 
-> If your Prowlarr runs in Docker too, use the host's LAN IP instead of `localhost`.
-
----
-
-## Adding directly to Sonarr / Radarr (without Prowlarr)
-
-**Settings → Indexers → Add → Torznab**
-
-| Field   | Value                                      |
-|---------|--------------------------------------------|
-| Name    | AllDebrid Indexer                          |
-| URL     | `http://<host>:5000/torznab`               |
-| API Key | your `TORZNAB_APIKEY`                      |
-| Categories | 5000 (TV) for Sonarr, 2000 (Movies) for Radarr |
+```json
+{
+  "media_type": "{media_type}",
+  "title": "{title}",
+  "grandparent_title": "{grandparent_title}",
+  "year": "{year}",
+  "grandparent_year": "{grandparent_year}",
+  "parent_media_index": "{parent_media_index}",
+  "media_index": "{media_index}",
+  "rating_key": "{rating_key}",
+  "imdb_id": "{imdb_id}",
+  "themoviedb_id": "{themoviedb_id}",
+  "thetvdb_id": "{thetvdb_id}"
+}
+```
 
 ---
 
-## Torznab API endpoints
+## Plex Setup
 
-| URL | Description |
-|-----|-------------|
-| `/torznab?t=caps&apikey=...` | Capabilities — Prowlarr calls this on Test |
-| `/torznab?t=search&q=...&apikey=...` | General search |
-| `/torznab?t=tvsearch&q=...&season=1&ep=5&apikey=...` | TV search with season/episode |
-| `/torznab?t=movie&q=...&apikey=...` | Movie search |
+Add two libraries pointing to the `plex-strm` folders:
 
----
+| Library | Path |
+|---------|------|
+| Movies  | `/docker/debridarr/plex-strm/movies` |
+| TV Shows | `/docker/debridarr/plex-strm/tv` |
 
-## Web UI search examples
-
-| Query | What it does |
-|-------|-------------|
-| `Breaking Bad` | All results for Breaking Bad |
-| `Breaking Bad S03` | Season 3 only |
-| `Breaking Bad S03E05` | Specific episode |
-| `The Bear Season 2` | Converts to S02 automatically |
-| `Oppenheimer 2023` | Search by title and year |
-| `Vanderpump Villa S01 1080p` | Season 1, filtered to 1080p |
-| `It's Always Sunny in Philadelphia S10` | Apostrophes handled automatically |
+Also add `/docker/debridarr/mnt-alldebrid` as a network path Plex can access (it must be able to follow symlinks into this folder).
 
 ---
 
-## Sort options (web UI)
+## Directory Structure
 
-After searching, use the pills to sort results:
-
-- **✅ Cached first** — AllDebrid instant downloads at the top (default)
-- **❌ Not cached first** — torrents not yet on AllDebrid
-- **🌱 Most seeded** — best availability regardless of cache
-- **📺 Episode (high→low)** — sorted by season and episode number
-
----
-
-## Environment variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ALLDEBRID_API_KEY` | Yes | Your AllDebrid API key |
-| `TORZNAB_APIKEY` | Yes | Password for the Torznab endpoint |
-| `PORT` | No | Port to run on (default: `5000`) |
-
----
-
-## How cache checking works
-
-1. Torrents are fetched from The Pirate Bay
-2. All hashes are uploaded to AllDebrid to check if they're instantly cached
-3. AllDebrid IDs are immediately deleted — nothing is added to your account
-4. Results marked ✅ are available instantly; ❌ means AllDebrid would need to download it
-5. When you click **Add** (web UI) or Sonarr/Radarr grabs a release, it's then added for real
+```
+/docker/debridarr/
+├── app/                  # Application code
+├── data/                 # Database + config (.env, .setup_complete)
+├── plex-strm/
+│   ├── movies/           # Movie placeholder + symlink files
+│   └── tv/               # TV placeholder + symlink files
+├── mnt-alldebrid/        # FUSE mount — AllDebrid torrents appear here
+│   └── <torrent-name>/
+│       └── <file.mkv>    # Virtual file, streamed from AllDebrid CDN
+├── config/tautulli/      # Tautulli config
+├── docker-compose.yml
+├── Dockerfile
+└── entrypoint.sh
+```
 
 ---
 
-## Troubleshooting
+## Web UI Pages
 
-**No results in Prowlarr test**
-Prowlarr's Test button only checks capabilities (`t=caps`). Use the Search button on a specific show in Sonarr/Radarr for a real test.
+| Page | Description |
+|------|-------------|
+| `/library` | Browse Overseerr requests, add to Plex library |
+| `/my-library` | View and manage added items |
+| `/streams` | Active resolved streams |
+| `/settings` | Configure AllDebrid, Overseerr, DFS cache |
 
-**"File is not a valid torrent" error**
-This was a known bug with how magnets were encoded. Make sure you're on the latest build.
+---
 
-**Apostrophes in show names (e.g. It's Always Sunny)**
-Handled automatically — special characters are stripped before querying.
+## DFS Cache (Streaming Performance)
 
-**Container can't reach AllDebrid or apibay**
-Check your Docker network settings. The container needs outbound internet access on port 443.
+Debridarr pre-fetches chunks from AllDebrid CDN into a local disk cache so Plex never stalls waiting for network. Configurable in **Settings → DFS Cache**:
 
-**Prowlarr is in Docker too**
-Use your host machine's LAN IP (e.g. `192.168.1.x`) instead of `localhost` in the indexer URL.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Cache Directory | `/tmp/cache` | Where chunks are stored |
+| Disk Cache Size | 30 GB | Maximum cache size |
+| Cache Expiry | 24h | How long to keep chunks |
+| Chunk Size | 8 MB | Fetch unit from CDN |
+| Read Ahead | 500 MB | Pre-fetch buffer |
+| Cleanup Interval | 20 min | How often to enforce limits |
+
+---
+
+## How Content Gets Into Plex
+
+1. Go to `/library` in the Debridarr UI
+2. Browse your Overseerr requests
+3. Click **Add to Library** on a movie or show
+4. Debridarr creates placeholder `.mp4` files — Plex scans and indexes them
+5. Press play in Plex → Tautulli fires → Debridarr resolves the stream
+6. The placeholder is replaced by a symlink → streaming starts
+
+---
+
+## Cache Expiry
+
+Resolved streams are cached for 30 days (configurable via `CACHE_TTL_DAYS`). When a cache entry expires:
+- The symlink is removed
+- The placeholder `.mp4` is restored
+- Next play will re-resolve the stream from AllDebrid
+
+---
+
+## Environment Variables
+
+Set in `data/.env` via the Settings UI or manually:
+
+| Variable | Description |
+|----------|-------------|
+| `ALLDEBRID_API_KEY` | Your AllDebrid API key |
+| `OVERSEERR_URL` | Overseerr URL e.g. `http://192.168.1.x:5055` |
+| `OVERSEERR_API_KEY` | Overseerr API key |
+| `PLEX_ROOT` | Path to plex-strm inside container (default `/plex-strm`) |
+| `FUSE_MOUNT` | FUSE mount path (default `/docker/debridarr/mnt-alldebrid`) |
+| `FUSE_SYMLINK_ROOT` | Host path for symlink targets (default `/docker/debridarr/mnt-alldebrid`) |
+| `CACHE_TTL_DAYS` | Days before stream cache expires (default `30`) |
+| `LOG_LEVEL` | `INFO` or `DEBUG` |
+
+---
+
+## Ports
+
+| Port | Service |
+|------|---------|
+| 7474 | Debridarr UI |
+| 8181 | Tautulli |
