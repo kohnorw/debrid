@@ -31,21 +31,17 @@ Placeholder `.mp4` files (140 bytes) are created in your Plex library so Plex ca
 
 ## First-Time Setup
 
-```bash
-# 1. Extract files
-tar -xzf debridarr_docker.tar.gz -C /
-mkdir -p /docker/debridarr
-tar -xzf debridarr_docker.tar.gz -C /tmp/dd
-cp -r /tmp/dd/docker/debridarr/. /docker/debridarr/
+```
+mkdir -p /tmp/dd && \
+tar -xzf ~/debridarr_docker.tar.gz -C /tmp/dd && \
+mkdir -p /docker/debridarr && \
+cp -r /tmp/dd/docker/debridarr/. /docker/debridarr/ && \
 rm -rf /tmp/dd
 
-# 2. Create required directories
-mkdir -p /docker/debridarr/{data,plex-strm,mnt-alldebrid,config/tautulli}
-
-# 3. Build and start
-cd /docker/debridarr
-docker-compose build --no-cache
-docker-compose up -d
+cd /docker/debridarr && \
+mkdir -p data plex-strm mnt-alldebrid config/tautulli && \
+docker-compose build --no-cache && \
+docker-compose up -d && \
 docker logs debridarr -f
 ```
 
