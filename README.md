@@ -33,6 +33,7 @@ Placeholder `.mp4` files (140 bytes) are created in your Plex library so Plex ca
 
 ```bash
 # 1. Extract files
+tar -xzf debridarr_docker.tar.gz -C /
 mkdir -p /docker/debridarr
 tar -xzf debridarr_docker.tar.gz -C /tmp/dd
 cp -r /tmp/dd/docker/debridarr/. /docker/debridarr/
