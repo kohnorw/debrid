@@ -1,6 +1,6 @@
 # Debridarr
 
-Stream-on-demand bridge between All-Debrid (via FUSE mount), Sonarr, Radarr, and Tautulli.
+Stream-on-demand bridge between Real-Debrid (via FUSE mount), Sonarr, Radarr, and Tautulli.
 
 ## How it works
 
