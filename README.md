@@ -2,6 +2,12 @@
 
 Stream-on-demand bridge between AllDebrid (via DFS FUSE), Sonarr, Radarr, and Tautulli. Placeholders appear in Plex for every monitored item. When you press Play, Debridarr finds the real file — from AllDebrid's FUSE mount or Sonarr/Radarr's disk — and symlinks it instantly.
 
+## Multiple instances
+
+Debridarr supports any number of Sonarr and Radarr instances, each with a name you choose (for example a 4K Sonarr/Radarr pair alongside your 1080p ones). Out of the box four instances are seeded: `sonarr`, `radarr`, `sonarr4k`, and `radarr4k` — the 4K pair starts blank, ready to configure in the setup wizard or the Connections tab.
+
+Each instance has an immutable **key** (a slug derived from its name on creation) and a free-form **name** you can rename at any time. The key anchors two things: the library rows for that instance and its on-disk placeholder tree under `/streams/<key>/...`. Point a separate Plex library at each instance's subfolder so a 1080p and a 4K copy of the same show never collide.
+
 ## How it works
 
 ```
@@ -60,12 +66,16 @@ The `rshared` volume mount on the full `/docker/debridarr` path is what makes th
 
 ## Plex library setup
 
-Add two libraries in Plex pointing at the streams folder:
+Add one Plex library per instance, each pointing at that instance's subfolder under the streams root:
 
-| Library type | Path |
-|---|---|
-| TV Shows | `/streams/sonarr` |
-| Movies | `/streams/radarr` |
+| Library type | Path | Instance |
+|---|---|---|
+| TV Shows | `/streams/sonarr` | `sonarr` (1080p) |
+| Movies | `/streams/radarr` | `radarr` (1080p) |
+| TV Shows | `/streams/sonarr4k` | `sonarr4k` |
+| Movies | `/streams/radarr4k` | `radarr4k` |
+
+Any custom-named instance lives at `/streams/<its-key>`. The key is shown next to each instance in the Connections tab.
 
 For faster metadata scanning, set each library's Agent to **Plex NFO Series** / **Plex NFO Movie** (requires Plex Media Server ≥ 1.43.1).
 
@@ -93,7 +103,9 @@ For faster metadata scanning, set each library's Agent to **Plex NFO Series** / 
 
 ## Environment variables
 
-Leave these blank to configure via the UI. Only set them if you want env vars to permanently override the database.
+Leave these blank to configure via the UI. The `SONARR_*`/`RADARR_*` vars only seed the **default** `sonarr` and `radarr` instances on first run; all other instances (including the 4K pair) live in the database and are managed from the wizard or Connections tab. Set an env var only if you want it to permanently override that instance's database value.
+
+When a Sonarr/Radarr instance imports a file, point its webhook (Settings → Connect → Webhook, triggers: On Import, On Upgrade, On File Delete) at the matching per-instance URL — e.g. `http://<debridarr-host>:7474/webhook/sonarr/sonarr4k` — so imports map to the right library tree. The bare `/webhook/sonarr` and `/webhook/radarr` URLs still work and route to the default instances.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -131,6 +143,13 @@ Leave these blank to configure via the UI. Only set them if you want env vars to
 | `POST` | `/webhook/tautulli` | Tautulli playback webhook |
 | `GET` | `/api/arr/sonarr/status` | Test Sonarr connection |
 | `GET` | `/api/arr/radarr/status` | Test Radarr connection |
+| `GET` | `/api/instances` | List all Sonarr/Radarr instances (api keys masked) |
+| `POST` | `/api/instances` | Add an instance (`name`, `type`, `url`, `api_key`); key is derived from the name |
+| `PATCH` | `/api/instances/{key}` | Update an instance (rename, change URL/key, enable/disable) |
+| `DELETE` | `/api/instances/{key}?purge=true` | Remove an instance (and optionally its library rows + `/streams/{key}` tree) |
+| `GET` | `/api/instances/{key}/status` | Test a specific instance's connection |
+| `POST` | `/webhook/sonarr/{key}` | Per-instance Sonarr import webhook |
+| `POST` | `/webhook/radarr/{key}` | Per-instance Radarr import webhook |
 | `GET` | `/api/tautulli/status` | Test Tautulli connection |
 | `GET` | `/api/fuse` | DFS FUSE mount status + registered torrents |
 | `POST` | `/api/fuse/reload` | Re-fetch AllDebrid torrents without restart |
